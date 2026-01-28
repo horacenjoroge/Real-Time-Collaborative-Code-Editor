@@ -1,10 +1,4 @@
-import {
-  insert,
-  applyOperation,
-  transform,
-  transformOperations,
-  type Operation,
-} from './ot';
+import { insert, applyOperation, transform, transformOperations, type Operation } from './ot';
 
 function assertEqual(label: string, a: string, b: string) {
   if (a !== b) {
@@ -88,9 +82,36 @@ export function runConflictResolutionExample() {
   assertEqual('Conflict resolution invariant', docAfterABPrime, docAfterBAPrime);
 }
 
+/**
+ * Stress test: apply a large number of operations and ensure the final
+ * state matches the expected deterministic result.
+ *
+ * This does not hit the database, but it exercises the OT core in a
+ * way that is representative of "replaying history".
+ */
+export function runReplayStressTest() {
+  let doc = '';
+
+  const operations: Operation[] = [];
+
+  // Build up a sequence of 1000 simple insert operations that
+  // deterministically create a known string.
+  for (let i = 0; i < 1000; i++) {
+    operations.push(insert(i, 'x'));
+  }
+
+  for (const op of operations) {
+    doc = applyOperation(doc, op);
+  }
+
+  const expected = 'x'.repeat(1000);
+  assertEqual('Replay 1000 operations', doc, expected);
+}
+
 // Allow running via ts-node/tsx: `tsx src/crdt/ot_example.ts`
 if (require.main === module) {
   runBasicOtExample();
   runConflictResolutionExample();
+  runReplayStressTest();
 }
 
