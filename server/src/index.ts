@@ -6,6 +6,7 @@ import { createServer } from 'http';
 import { setupWebSocketServer } from './websocket';
 import { initializeDatabase, checkDatabaseHealth } from './database/connection';
 import documentRoutes from './document/routes';
+import operationRoutes from './operations/routes';
 
 dotenv.config();
 
@@ -38,6 +39,7 @@ app.get('/health', async (_req, res) => {
 
 // API routes
 app.use('/api/documents', documentRoutes);
+app.use('/api/documents', operationRoutes);
 
 // Initialize database and start server
 async function startServer() {
