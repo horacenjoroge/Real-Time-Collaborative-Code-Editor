@@ -4,6 +4,8 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { setupWebSocketServer } from './websocket';
+import { initializeDatabase, checkDatabaseHealth } from './database/connection';
+import documentRoutes from './document/routes';
 
 dotenv.config();
 
@@ -25,16 +27,38 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get('/health', async (req, res) => {
+  const dbHealthy = await checkDatabaseHealth();
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    database: dbHealthy ? 'connected' : 'disconnected',
+  });
 });
 
-// Setup WebSocket server
-setupWebSocketServer(httpServer);
+// API routes
+app.use('/api/documents', documentRoutes);
 
-// Start server
-httpServer.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔌 WebSocket server ready`);
-});
+// Initialize database and start server
+async function startServer() {
+  try {
+    // Initialize database schema
+    await initializeDatabase();
+    
+    // Setup WebSocket server
+    setupWebSocketServer(httpServer);
+
+    // Start server
+    httpServer.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🔌 WebSocket server ready`);
+      console.log(`💾 Database connected`);
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();

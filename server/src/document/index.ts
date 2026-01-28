@@ -1,6 +1,4 @@
-// Document management and CRDT operations
-// This will be implemented in later phases
-
-export class DocumentManager {
-  // Placeholder for document management
-}
+// Document management exports
+export { documentService } from './service';
+export { default as documentRoutes } from './routes';
+export * from '../database/types';
