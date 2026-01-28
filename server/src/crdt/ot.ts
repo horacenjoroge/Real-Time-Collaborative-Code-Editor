@@ -205,3 +205,23 @@ export function transform(opA: Operation, opB: Operation): Operation {
   return opA;
 }
 
+/**
+ * Transform a sequence of operations `ops` so that it can be applied
+ * after another sequence of operations `against`.
+ *
+ * This is a very small helper that simply applies the single-op
+ * `transform` function pairwise in order. For our current diff model
+ * (retain/delete/insert in short sequences) this is sufficient.
+ */
+export function transformOperations(ops: Operation[], against: Operation[]): Operation[] {
+  // Start with a shallow copy so we don't mutate the original array.
+  let result = ops.map((op) => ({ ...op }));
+
+  for (const opB of against) {
+    result = result.map((opA) => transform(opA, opB));
+  }
+
+  return result;
+}
+
+
