@@ -9,6 +9,7 @@ import { authenticateSocket } from './auth';
 import { roomManager } from './roomManager';
 import type { Operation } from '../crdt/ot';
 import { transformOperations } from '../crdt/ot';
+import { operationHistoryService } from '../operations/service';
 
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
 const PING_TIMEOUT = 60000; // 60 seconds
@@ -157,6 +158,19 @@ export function setupWebSocketServer(httpServer: HTTPServer): SocketIOServer {
         history.push(message);
         documentOperationHistory.set(documentId, history);
         documentVersions.set(documentId, nextVersion);
+
+        // Persist operation to the database for long-term history.
+        void operationHistoryService
+          .storeOperation({
+            documentId,
+            userId,
+            version: nextVersion,
+            operations: transformedOps,
+            timestamp: message.timestamp,
+          })
+          .catch((err) => {
+            console.error('Failed to store operation history:', err);
+          });
 
         // Broadcast to all other clients in the room (including the sender
         // so they can reconcile with the transformed version).
