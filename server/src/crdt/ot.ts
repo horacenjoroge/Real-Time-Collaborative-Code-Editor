@@ -25,6 +25,13 @@ export function applyOperation(doc: string, op: Operation): string {
   }
 }
 
+/**
+ * Apply a sequence of operations to a document.
+ */
+export function applyOperations(doc: string, ops: Operation[]): string {
+  return ops.reduce((current, op) => applyOperation(current, op), doc);
+}
+
 // Convenience constructors
 export function insert(position: number, char: string): InsertOp {
   return { type: 'insert', position, char };
