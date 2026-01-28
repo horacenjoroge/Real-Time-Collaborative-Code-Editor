@@ -60,8 +60,23 @@ export interface SocketEvents {
   'document-operation': {
     documentId: string;
     userId: string;
+    /**
+     * Version the sender based this operation on.
+     * Present on client->server and server->client messages.
+     */
+    baseVersion: number;
+    /**
+     * Version after the server applied this operation.
+     */
     version: number;
     operations: unknown[]; // Operations are interpreted in the editor layer
     timestamp: number;
+    clientOpId?: string;
+  };
+  'operation-ack': {
+    documentId: string;
+    userId: string;
+    version: number;
+    clientOpId?: string;
   };
 }
