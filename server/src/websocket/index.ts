@@ -54,7 +54,7 @@ export function setupWebSocketServer(httpServer: HTTPServer): SocketIOServer {
           return;
         }
 
-        const room = roomManager.joinRoom(socket, documentId);
+        roomManager.joinRoom(socket, documentId);
         const users = roomManager.getRoomUsers(documentId);
 
         // Notify the user they joined

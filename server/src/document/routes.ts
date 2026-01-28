@@ -20,10 +20,10 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
     const documents = await documentService.listUserDocuments(userId);
-    res.json({ documents });
+    return res.json({ documents });
   } catch (error) {
     console.error('Error listing documents:', error);
-    res.status(500).json({ error: 'Failed to list documents' });
+    return res.status(500).json({ error: 'Failed to list documents' });
   }
 });
 
@@ -45,10 +45,10 @@ router.get('/:id', async (req: Request, res: Response) => {
     // Update last seen
     await documentService.updateLastSeen(id, userId);
 
-    res.json({ document });
+    return res.json({ document });
   } catch (error) {
     console.error('Error getting document:', error);
-    res.status(500).json({ error: 'Failed to get document' });
+    return res.status(500).json({ error: 'Failed to get document' });
   }
 });
 
@@ -67,10 +67,10 @@ router.post('/', async (req: Request, res: Response) => {
     };
 
     const document = await documentService.createDocument(input);
-    res.status(201).json({ document });
+    return res.status(201).json({ document });
   } catch (error) {
     console.error('Error creating document:', error);
-    res.status(500).json({ error: 'Failed to create document' });
+    return res.status(500).json({ error: 'Failed to create document' });
   }
 });
 
@@ -94,13 +94,13 @@ router.put('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    res.json({ document });
+    return res.json({ document });
   } catch (error) {
     if (error instanceof Error && error.message === 'Permission denied') {
       return res.status(403).json({ error: 'Permission denied' });
     }
     console.error('Error updating document:', error);
-    res.status(500).json({ error: 'Failed to update document' });
+    return res.status(500).json({ error: 'Failed to update document' });
   }
 });
 
@@ -119,13 +119,13 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    res.json({ success: true });
+    return res.json({ success: true });
   } catch (error) {
     if (error instanceof Error && error.message.includes('Permission denied')) {
       return res.status(403).json({ error: error.message });
     }
     console.error('Error deleting document:', error);
-    res.status(500).json({ error: 'Failed to delete document' });
+    return res.status(500).json({ error: 'Failed to delete document' });
   }
 });
 
@@ -145,10 +145,10 @@ router.get('/:id/users', async (req: Request, res: Response) => {
     }
 
     const users = await documentService.getDocumentUsers(id);
-    res.json({ users });
+    return res.json({ users });
   } catch (error) {
     console.error('Error getting document users:', error);
-    res.status(500).json({ error: 'Failed to get document users' });
+    return res.status(500).json({ error: 'Failed to get document users' });
   }
 });
 
@@ -174,10 +174,10 @@ router.post('/:id/users', async (req: Request, res: Response) => {
       role,
     });
 
-    res.json({ success: true });
+    return res.json({ success: true });
   } catch (error) {
     console.error('Error adding document permission:', error);
-    res.status(500).json({ error: 'Failed to add permission' });
+    return res.status(500).json({ error: 'Failed to add permission' });
   }
 });
 

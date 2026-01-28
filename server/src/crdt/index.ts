@@ -1,6 +1,6 @@
-// CRDT (Conflict-free Replicated Data Type) implementation
-// This will be implemented in later phases
+// Basic Operational Transformation (OT) operations for text documents.
+// This module provides a minimal OT core that we will extend in later phases
+// to support full real-time collaborative editing.
 
-export class CRDT {
-  // Placeholder for CRDT implementation
-}
+export * from './ot';
+

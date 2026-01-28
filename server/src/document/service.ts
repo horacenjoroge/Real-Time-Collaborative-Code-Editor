@@ -133,7 +133,7 @@ export class DocumentService {
       [documentId]
     );
 
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   /**
@@ -183,7 +183,7 @@ export class DocumentService {
       [documentId, userId]
     );
 
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   /**

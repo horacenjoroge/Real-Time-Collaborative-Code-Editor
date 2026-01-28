@@ -1,7 +1,8 @@
-import jwt from 'jsonwebtoken';
+import jwt, { type Secret, type SignOptions } from 'jsonwebtoken';
 import { AuthenticatedSocket } from './types';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const JWT_SECRET: Secret =
+  process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 export interface JWTPayload {
   userId: string;
@@ -48,7 +49,10 @@ export function authenticateSocket(
  * Generate JWT token for testing/development
  */
 export function generateToken(userId: string, username: string): string {
-  return jwt.sign({ userId, username }, JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  });
+  const payload: JWTPayload = { userId, username };
+  const options: SignOptions = {
+    // Cast to any to satisfy stricter typings around StringValue
+    expiresIn: (process.env.JWT_EXPIRES_IN || '7d') as any,
+  };
+  return jwt.sign(payload, JWT_SECRET, options);
 }
