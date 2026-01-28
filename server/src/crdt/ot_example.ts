@@ -1,4 +1,10 @@
-import { insert, applyOperation, transform, type Operation } from './ot';
+import {
+  insert,
+  applyOperation,
+  transform,
+  transformOperations,
+  type Operation,
+} from './ot';
 
 function assertEqual(label: string, a: string, b: string) {
   if (a !== b) {
@@ -52,8 +58,39 @@ export function runBasicOtExample() {
   assertEqual('Expected final doc', docAfterBThenAPrime, expected);
 }
 
+/**
+ * Simple conflict resolution example mirroring the Task 7 scenario:
+ *
+ * Server at version 10, both clients at base version 10.
+ * A: insert(5, "X"), B: insert(7, "Y").
+ *
+ * We simulate the server receiving A first, then transforming B
+ * against A using the transformOperations helper.
+ */
+export function runConflictResolutionExample() {
+  const baseDoc = 'abcdefghij'; // length 10
+
+  const opA = insert(5, 'X');
+  const opB = insert(7, 'Y');
+
+  // Server applies A first
+  const docAfterA = applyOperation(baseDoc, opA);
+
+  // Server transforms B against A before applying
+  const [bPrime] = transformOperations([opB], [opA]);
+  const docAfterABPrime = applyOperation(docAfterA, bPrime);
+
+  // For comparison: apply B first, then transform A against B
+  const docAfterB = applyOperation(baseDoc, opB);
+  const aPrime: Operation = transform(opA, opB);
+  const docAfterBAPrime = applyOperation(docAfterB, aPrime);
+
+  assertEqual('Conflict resolution invariant', docAfterABPrime, docAfterBAPrime);
+}
+
 // Allow running via ts-node/tsx: `tsx src/crdt/ot_example.ts`
 if (require.main === module) {
   runBasicOtExample();
+  runConflictResolutionExample();
 }
 
