@@ -1,9 +1,14 @@
 import { Server as HTTPServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
-import { AuthenticatedSocket, DocumentOperationMessage } from './types';
+import {
+  AuthenticatedSocket,
+  DocumentOperationAckMessage,
+  DocumentOperationMessage,
+} from './types';
 import { authenticateSocket } from './auth';
 import { roomManager } from './roomManager';
 import type { Operation } from '../crdt/ot';
+import { transformOperations } from '../crdt/ot';
 
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
 const PING_TIMEOUT = 60000; // 60 seconds
@@ -109,7 +114,7 @@ export function setupWebSocketServer(httpServer: HTTPServer): SocketIOServer {
       'document-operation',
       (data: DocumentOperationMessage & { operations: Operation[] }) => {
       try {
-        const { documentId, operations } = data;
+        const { documentId, operations, baseVersion, clientOpId } = data;
 
         if (!documentId || !Array.isArray(operations) || operations.length === 0) {
           socket.emit('error', { message: 'Invalid operation payload' });
@@ -122,24 +127,50 @@ export function setupWebSocketServer(httpServer: HTTPServer): SocketIOServer {
         }
 
         const currentVersion = documentVersions.get(documentId) ?? 0;
+
+        // Transform the incoming operations against any operations
+        // that the server has already applied after baseVersion.
+        const history = documentOperationHistory.get(documentId) ?? [];
+        let transformedOps: Operation[] = operations;
+
+        if (typeof baseVersion === 'number') {
+          for (const past of history) {
+            if (past.version > baseVersion) {
+              transformedOps = transformOperations(transformedOps, past.operations);
+            }
+          }
+        }
+
         const nextVersion = currentVersion + 1;
 
         const message: DocumentOperationMessage = {
           documentId,
           userId,
+          baseVersion: typeof baseVersion === 'number' ? baseVersion : currentVersion,
           version: nextVersion,
-          operations,
+          operations: transformedOps,
           timestamp: Date.now(),
+          clientOpId,
         };
 
         // Store in history
-        const history = documentOperationHistory.get(documentId) ?? [];
         history.push(message);
         documentOperationHistory.set(documentId, history);
         documentVersions.set(documentId, nextVersion);
 
-        // Broadcast to all other clients in the room
+        // Broadcast to all other clients in the room (including the sender
+        // so they can reconcile with the transformed version).
         socket.to(documentId).emit('document-operation', message);
+
+        // Acknowledge back to the originating client so it can
+        // advance its confirmed version and clear pending buffers.
+        const ack: DocumentOperationAckMessage = {
+          documentId,
+          userId,
+          version: nextVersion,
+          clientOpId,
+        };
+        socket.emit('operation-ack', ack);
       } catch (error) {
         console.error('Error handling document operation:', error);
         socket.emit('error', { message: 'Failed to process document operation' });
