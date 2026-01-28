@@ -26,3 +26,15 @@ export interface ConnectionStatus {
   reconnecting: boolean;
   error?: string;
 }
+
+// OT operation message sent over WebSocket
+// Reuses the Operation type from the CRDT OT module.
+import type { Operation } from '../crdt/ot';
+
+export interface DocumentOperationMessage {
+  documentId: string;
+  userId: string;
+  version: number;
+  operations: Operation[];
+  timestamp: number;
+}

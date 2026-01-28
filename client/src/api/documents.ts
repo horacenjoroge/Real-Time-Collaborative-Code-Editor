@@ -27,7 +27,7 @@ export interface UpdateDocumentInput {
 }
 
 // Get user ID from localStorage or generate one
-function getUserId(): string {
+export function getUserId(): string {
   let userId = localStorage.getItem('userId');
   if (!userId) {
     userId = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;

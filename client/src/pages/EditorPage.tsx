@@ -4,8 +4,13 @@ import { EditorComponent, EditorConfig, Language } from '../editor/EditorCompone
 import { Toolbar } from '../components/Toolbar';
 import { DisconnectionBanner } from '../components/DisconnectionBanner';
 import { useWebSocket } from '../websocket/useWebSocket';
-import { documentApi, Document } from '../api/documents';
+import { documentApi, Document, getUserId } from '../api/documents';
 import { saveFileToStorage } from '../editor/fileOperations';
+import {
+  applyOperations,
+  diffToOperations,
+  type Operation as OtOperation,
+} from '../editor/otClient';
 
 const DEFAULT_CONFIG: EditorConfig = {
   language: 'typescript',
@@ -28,11 +33,22 @@ export function EditorPage() {
   const [isModified, setIsModified] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleSaveRef = useRef<() => Promise<void>>();
+  const lastContentRef = useRef<string>('');
+  const localVersionRef = useRef<number>(0);
+  const userIdRef = useRef<string>(getUserId());
 
   // WebSocket connection
-  const { status: connectionStatus, connect, disconnect, emit, on, off, isConnected } = useWebSocket({
+  const {
+    status: connectionStatus,
+    connect,
+    disconnect,
+    emit,
+    on,
+    off,
+    isConnected,
+  } = useWebSocket({
     autoConnect: true,
     onConnect: () => {
       if (id) {
@@ -48,7 +64,7 @@ export function EditorPage() {
       return;
     }
 
-    loadDocument();
+    void loadDocument();
   }, [id]);
 
   const loadDocument = async () => {
@@ -58,6 +74,7 @@ export function EditorPage() {
       const doc = await documentApi.getDocument(id!);
       setDocument(doc);
       setContent(doc.content);
+      lastContentRef.current = doc.content;
       setConfig((prev) => ({
         ...prev,
         language: doc.language as Language,
@@ -88,7 +105,11 @@ export function EditorPage() {
       console.log('User joined:', data);
     };
 
-    const handleUserLeft = (data: { userId: string; username: string; reason?: string }) => {
+    const handleUserLeft = (data: {
+      userId: string;
+      username: string;
+      reason?: string;
+    }) => {
       console.log('User left:', data);
     };
 
@@ -96,18 +117,34 @@ export function EditorPage() {
       console.error('Socket error:', data.message);
     };
 
+    const handleDocumentOperation = (data: {
+      documentId: string;
+      userId: string;
+      version: number;
+      operations: OtOperation[];
+      timestamp: number;
+    }) => {
+      if (!document || data.documentId !== document.id) return;
+
+      const newContent = applyOperations(lastContentRef.current, data.operations);
+      lastContentRef.current = newContent;
+      setContent(newContent);
+    };
+
     on('joined-document', handleJoinedDocument);
     on('user-joined', handleUserJoined);
     on('user-left', handleUserLeft);
     on('error', handleError);
+    on('document-operation', handleDocumentOperation as never);
 
     return () => {
       off('joined-document', handleJoinedDocument);
       off('user-joined', handleUserJoined);
       off('user-left', handleUserLeft);
       off('error', handleError);
+      off('document-operation', handleDocumentOperation as never);
     };
-  }, [on, off]);
+  }, [on, off, document]);
 
   // Auto-save with debounce
   useEffect(() => {
@@ -131,7 +168,26 @@ export function EditorPage() {
   }, [content, document, isModified, handleSaveRef]);
 
   const handleContentChange = (value: string | undefined) => {
-    setContent(value || '');
+    const newValue = value ?? '';
+
+    // Compute OT operations from previous content to new content
+    const ops: OtOperation[] = diffToOperations(lastContentRef.current, newValue);
+
+    if (ops.length > 0 && document) {
+      const message = {
+        documentId: document.id,
+        userId: userIdRef.current,
+        version: localVersionRef.current + 1,
+        operations: ops,
+        timestamp: Date.now(),
+      };
+
+      emit('document-operation', message as never);
+      localVersionRef.current += 1;
+    }
+
+    lastContentRef.current = newValue;
+    setContent(newValue);
     setIsModified(true);
   };
 
@@ -182,7 +238,7 @@ export function EditorPage() {
       // Ctrl+S or Cmd+S to save
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
-        handleSave();
+        void handleSave();
       }
     };
 

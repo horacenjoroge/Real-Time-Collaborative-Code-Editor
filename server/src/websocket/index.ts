@@ -1,11 +1,17 @@
 import { Server as HTTPServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
-import { AuthenticatedSocket } from './types';
+import { AuthenticatedSocket, DocumentOperationMessage } from './types';
 import { authenticateSocket } from './auth';
 import { roomManager } from './roomManager';
+import type { Operation } from '../crdt/ot';
 
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
 const PING_TIMEOUT = 60000; // 60 seconds
+
+// In-memory document operation history and version tracking.
+// In later phases this can be persisted to Redis/Postgres.
+const documentVersions = new Map<string, number>();
+const documentOperationHistory = new Map<string, DocumentOperationMessage[]>();
 
 export function setupWebSocketServer(httpServer: HTTPServer): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
@@ -95,6 +101,48 @@ export function setupWebSocketServer(httpServer: HTTPServer): SocketIOServer {
 
         roomManager.leaveRoom(socket);
         socket.emit('left-document', { documentId: socket.roomId });
+      }
+    });
+
+    // Handle incoming OT operations for a document
+    socket.on(
+      'document-operation',
+      (data: DocumentOperationMessage & { operations: Operation[] }) => {
+      try {
+        const { documentId, operations } = data;
+
+        if (!documentId || !Array.isArray(operations) || operations.length === 0) {
+          socket.emit('error', { message: 'Invalid operation payload' });
+          return;
+        }
+
+        if (!socket.roomId || socket.roomId !== documentId) {
+          socket.emit('error', { message: 'Not joined to this document room' });
+          return;
+        }
+
+        const currentVersion = documentVersions.get(documentId) ?? 0;
+        const nextVersion = currentVersion + 1;
+
+        const message: DocumentOperationMessage = {
+          documentId,
+          userId,
+          version: nextVersion,
+          operations,
+          timestamp: Date.now(),
+        };
+
+        // Store in history
+        const history = documentOperationHistory.get(documentId) ?? [];
+        history.push(message);
+        documentOperationHistory.set(documentId, history);
+        documentVersions.set(documentId, nextVersion);
+
+        // Broadcast to all other clients in the room
+        socket.to(documentId).emit('document-operation', message);
+      } catch (error) {
+        console.error('Error handling document operation:', error);
+        socket.emit('error', { message: 'Failed to process document operation' });
       }
     });
 

@@ -57,4 +57,11 @@ export interface SocketEvents {
   pong: {
     timestamp: number;
   };
+  'document-operation': {
+    documentId: string;
+    userId: string;
+    version: number;
+    operations: unknown[]; // Operations are interpreted in the editor layer
+    timestamp: number;
+  };
 }

@@ -32,7 +32,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   });
 
   const socketRef = useRef<Socket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const isManualDisconnectRef = useRef(false);
 
@@ -167,16 +167,16 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     }, delay);
   }, [connect]);
 
-  const emit = useCallback(<K extends keyof SocketEvents>(
-    event: K,
-    data: Parameters<Socket['emit']>[1]
-  ) => {
-    if (socketRef.current?.connected) {
-      socketRef.current.emit(event, data);
-    } else {
-      console.warn('Socket not connected, cannot emit:', event);
-    }
-  }, []);
+  const emit = useCallback(
+    (event: keyof SocketEvents | string, data: unknown) => {
+      if (socketRef.current?.connected) {
+        socketRef.current.emit(event, data as never);
+      } else {
+        console.warn('Socket not connected, cannot emit:', event);
+      }
+    },
+    []
+  );
 
   const on = useCallback(<K extends keyof SocketEvents>(
     event: K,
