@@ -9,6 +9,7 @@ import { saveFileToStorage } from '../editor/fileOperations';
 import {
   applyOperations,
   diffToOperations,
+  transformOperations,
   type Operation as OtOperation,
 } from '../editor/otClient';
 
@@ -36,8 +37,19 @@ export function EditorPage() {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleSaveRef = useRef<() => Promise<void>>();
   const lastContentRef = useRef<string>('');
-  const localVersionRef = useRef<number>(0);
+  /**
+   * The last document version that we know the server has confirmed.
+   */
+  const confirmedVersionRef = useRef<number>(0);
   const userIdRef = useRef<string>(getUserId());
+  const clientOpCounterRef = useRef<number>(0);
+  const pendingOpsRef = useRef<
+    Array<{
+      clientOpId: string;
+      baseVersion: number;
+      operations: OtOperation[];
+    }>
+  >([]);
 
   // WebSocket connection
   const {
@@ -120,15 +132,67 @@ export function EditorPage() {
     const handleDocumentOperation = (data: {
       documentId: string;
       userId: string;
+      baseVersion: number;
       version: number;
       operations: OtOperation[];
       timestamp: number;
+      clientOpId?: string;
     }) => {
       if (!document || data.documentId !== document.id) return;
 
-      const newContent = applyOperations(lastContentRef.current, data.operations);
+      // Update our view of the server version.
+      confirmedVersionRef.current = Math.max(confirmedVersionRef.current, data.version);
+
+      const isLocal = data.userId === userIdRef.current;
+
+      // First, transform the incoming operations against all of our
+      // pending local operations so they apply cleanly to our local state.
+      let incomingOps: OtOperation[] = data.operations;
+      for (const pending of pendingOpsRef.current) {
+        incomingOps = transformOperations(incomingOps, pending.operations);
+      }
+
+      const newContent = applyOperations(lastContentRef.current, incomingOps);
       lastContentRef.current = newContent;
       setContent(newContent);
+
+      if (isLocal) {
+        // When the server echoes our own operation back, treat this as
+        // confirmation and drop the matching pending op (if still present).
+        if (data.clientOpId) {
+          pendingOpsRef.current = pendingOpsRef.current.filter(
+            (p) => p.clientOpId !== data.clientOpId
+          );
+        } else {
+          pendingOpsRef.current = pendingOpsRef.current.slice(1);
+        }
+      } else {
+        // For remote operations, we also need to transform our pending
+        // local operations so that when they eventually apply on the
+        // server they converge with this remote op.
+        pendingOpsRef.current = pendingOpsRef.current.map((p) => ({
+          ...p,
+          operations: transformOperations(p.operations, data.operations),
+        }));
+      }
+    };
+
+    const handleOperationAck = (data: {
+      documentId: string;
+      userId: string;
+      version: number;
+      clientOpId?: string;
+    }) => {
+      if (!document || data.documentId !== document.id) return;
+      if (data.userId !== userIdRef.current) return;
+
+      confirmedVersionRef.current = Math.max(confirmedVersionRef.current, data.version);
+
+      if (data.clientOpId) {
+        pendingOpsRef.current = pendingOpsRef.current.filter(
+          (p) => p.clientOpId !== data.clientOpId
+        );
+      }
     };
 
     on('joined-document', handleJoinedDocument);
@@ -136,6 +200,7 @@ export function EditorPage() {
     on('user-left', handleUserLeft);
     on('error', handleError);
     on('document-operation', handleDocumentOperation as never);
+    on('operation-ack', handleOperationAck as never);
 
     return () => {
       off('joined-document', handleJoinedDocument);
@@ -143,6 +208,7 @@ export function EditorPage() {
       off('user-left', handleUserLeft);
       off('error', handleError);
       off('document-operation', handleDocumentOperation as never);
+      off('operation-ack', handleOperationAck as never);
     };
   }, [on, off, document]);
 
@@ -174,16 +240,34 @@ export function EditorPage() {
     const ops: OtOperation[] = diffToOperations(lastContentRef.current, newValue);
 
     if (ops.length > 0 && document) {
+      const baseVersion = confirmedVersionRef.current;
+      const clientOpId = `${userIdRef.current}-${Date.now()}-${
+        clientOpCounterRef.current++
+      }`;
+
+      // Add to our pending buffer so we can transform future incoming
+      // operations and clear it when we receive acks.
+      pendingOpsRef.current = [
+        ...pendingOpsRef.current,
+        {
+          clientOpId,
+          baseVersion,
+          operations: ops,
+        },
+      ];
+
       const message = {
         documentId: document.id,
         userId: userIdRef.current,
-        version: localVersionRef.current + 1,
+        baseVersion,
+        // Server will fill in the final document version.
+        version: 0,
         operations: ops,
         timestamp: Date.now(),
+        clientOpId,
       };
 
       emit('document-operation', message as never);
-      localVersionRef.current += 1;
     }
 
     lastContentRef.current = newValue;
