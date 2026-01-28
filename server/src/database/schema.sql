@@ -26,6 +26,19 @@ CREATE INDEX IF NOT EXISTS idx_documents_deleted_at ON documents(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_document_users_user_id ON document_users(user_id);
 CREATE INDEX IF NOT EXISTS idx_document_users_document_id ON document_users(document_id);
 
+-- OT operations history table
+CREATE TABLE IF NOT EXISTS operations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL,
+  version INTEGER NOT NULL,
+  operation JSONB NOT NULL,
+  timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_operations_doc_version
+  ON operations(document_id, version);
+
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
