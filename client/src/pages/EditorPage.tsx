@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { EditorComponent, EditorConfig, Language } from '../editor/EditorComponent';
 import { Toolbar } from '../components/Toolbar';
 import { DisconnectionBanner } from '../components/DisconnectionBanner';
+import { PresenceSidebar } from '../components/PresenceSidebar';
+import type { PresenceUser } from '../websocket/types';
 import { useWebSocket } from '../websocket/useWebSocket';
 import { documentApi, Document, getUserId } from '../api/documents';
 import { saveFileToStorage } from '../editor/fileOperations';
@@ -34,6 +36,7 @@ export function EditorPage() {
   const [isModified, setIsModified] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleSaveRef = useRef<() => Promise<void>>();
   const lastContentRef = useRef<string>('');
@@ -100,8 +103,9 @@ export function EditorPage() {
     }
   };
 
-  // Join document room when connected
+  // Reset presence when switching document; join when connected
   useEffect(() => {
+    setPresenceUsers([]);
     if (isConnected && id) {
       emit('join-document', { documentId: id });
     }
@@ -109,20 +113,22 @@ export function EditorPage() {
 
   // Set up WebSocket event listeners
   useEffect(() => {
-    const handleJoinedDocument = (data: { documentId: string; users: unknown[] }) => {
-      console.log('Joined document:', data);
+    const handleJoinedDocument = (data: { documentId: string; users: PresenceUser[] }) => {
+      if (data.documentId !== document?.id) return;
+      setPresenceUsers(data.users ?? []);
     };
 
-    const handleUserJoined = (data: { userId: string; username: string }) => {
-      console.log('User joined:', data);
+    const handleUserJoined = (data: { user: PresenceUser; timestamp: number }) => {
+      if (!data.user) return;
+      setPresenceUsers((prev) => {
+        const exists = prev.some((u) => u.id === data.user!.id);
+        if (exists) return prev.map((u) => (u.id === data.user!.id ? data.user! : u));
+        return [...prev, data.user!];
+      });
     };
 
-    const handleUserLeft = (data: {
-      userId: string;
-      username: string;
-      reason?: string;
-    }) => {
-      console.log('User left:', data);
+    const handleUserLeft = (data: { userId: string; username?: string; name?: string; reason?: string }) => {
+      setPresenceUsers((prev) => prev.filter((u) => u.id !== data.userId));
     };
 
     const handleError = (data: { message: string }) => {
@@ -372,12 +378,15 @@ export function EditorPage() {
         onReconnect={handleReconnect}
       />
 
-      <div className="flex-1 overflow-hidden">
-        <EditorComponent
-          value={content}
-          onChange={handleContentChange}
-          config={config}
-        />
+      <div className="flex-1 flex overflow-hidden">
+        <PresenceSidebar users={presenceUsers} currentUserId={userIdRef.current} />
+        <div className="flex-1 overflow-hidden min-w-0">
+          <EditorComponent
+            value={content}
+            onChange={handleContentChange}
+            config={config}
+          />
+        </div>
       </div>
 
       {/* Status Bar */}
