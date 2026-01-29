@@ -1,5 +1,6 @@
 import { Server as HTTPServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
+import type { User } from './types';
 import {
   AuthenticatedSocket,
   DocumentOperationAckMessage,
@@ -10,14 +11,32 @@ import { roomManager } from './roomManager';
 import type { Operation } from '../crdt/ot';
 import { transformOperations } from '../crdt/ot';
 import { operationHistoryService } from '../operations/service';
+import {
+  addUserToPresence,
+  removeUserFromPresence,
+  updatePresenceHeartbeat,
+  removeStalePresence,
+} from '../presence/service';
 
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
 const PING_TIMEOUT = 60000; // 60 seconds
 
 // In-memory document operation history and version tracking.
-// In later phases this can be persisted to Redis/Postgres.
 const documentVersions = new Map<string, number>();
 const documentOperationHistory = new Map<string, DocumentOperationMessage[]>();
+
+/** Serialize user for client (no socketId). */
+function toPresenceUser(u: User): { id: string; name: string; color: string; cursor: { line: number; column: number }; selection: { start: { line: number; column: number }; end: { line: number; column: number } } | null; lastSeen: number; joinedAt: number } {
+  return {
+    id: u.id,
+    name: u.name,
+    color: u.color,
+    cursor: u.cursor,
+    selection: u.selection,
+    lastSeen: u.lastSeen,
+    joinedAt: u.joinedAt,
+  };
+}
 
 export function setupWebSocketServer(httpServer: HTTPServer): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
@@ -58,7 +77,7 @@ export function setupWebSocketServer(httpServer: HTTPServer): SocketIOServer {
     });
 
     // Handle joining a document room
-    socket.on('join-document', (data: { documentId: string }) => {
+    socket.on('join-document', async (data: { documentId: string }) => {
       try {
         const { documentId } = data;
         if (!documentId) {
@@ -68,23 +87,24 @@ export function setupWebSocketServer(httpServer: HTTPServer): SocketIOServer {
 
         roomManager.joinRoom(socket, documentId);
         const users = roomManager.getRoomUsers(documentId);
+        const me = users.find((u) => u.id === (socket.userId || socket.id));
+        if (me) {
+          await addUserToPresence(documentId, me);
+        }
 
-        // Notify the user they joined
+        // Notify the user they joined (full presence list)
         socket.emit('joined-document', {
           documentId,
-          users: users.map((u) => ({
-            id: u.id,
-            username: u.username,
-            joinedAt: u.joinedAt,
-          })),
+          users: users.map(toPresenceUser),
         });
 
-        // Notify other users in the room
-        socket.to(documentId).emit('user-joined', {
-          userId,
-          username,
-          timestamp: Date.now(),
-        });
+        // Broadcast to all others in the room (full user for presence sidebar)
+        if (me) {
+          socket.to(documentId).emit('user-joined', {
+            user: toPresenceUser(me),
+            timestamp: Date.now(),
+          });
+        }
 
         console.log(`User ${username} joined document: ${documentId}`);
       } catch (error) {
@@ -94,19 +114,22 @@ export function setupWebSocketServer(httpServer: HTTPServer): SocketIOServer {
     });
 
     // Handle leaving a document room
-    socket.on('leave-document', () => {
+    socket.on('leave-document', async () => {
       if (socket.roomId) {
+        const documentId = socket.roomId;
         const userId = socket.userId || socket.id;
         const username = socket.username || 'Anonymous';
-        
-        socket.to(socket.roomId).emit('user-left', {
+
+        await removeUserFromPresence(documentId, userId);
+        socket.to(documentId).emit('user-left', {
           userId,
           username,
+          name: username,
           timestamp: Date.now(),
         });
 
         roomManager.leaveRoom(socket);
-        socket.emit('left-document', { documentId: socket.roomId });
+        socket.emit('left-document', { documentId });
       }
     });
 
@@ -191,29 +214,38 @@ export function setupWebSocketServer(httpServer: HTTPServer): SocketIOServer {
       }
     });
 
-    // Handle ping/pong heartbeat
+    // Handle ping/pong heartbeat (updates lastSeen in memory and Redis)
     socket.on('ping', () => {
       roomManager.updateUserPing(socket);
+      if (socket.roomId) {
+        const userId = socket.userId || socket.id;
+        void updatePresenceHeartbeat(socket.roomId, userId, { lastSeen: Date.now() });
+      }
       socket.emit('pong', { timestamp: Date.now() });
     });
 
-    // Handle client pong response
     socket.on('pong', () => {
       roomManager.updateUserPing(socket);
+      if (socket.roomId) {
+        const userId = socket.userId || socket.id;
+        void updatePresenceHeartbeat(socket.roomId, userId, { lastSeen: Date.now() });
+      }
     });
 
     // Handle disconnection
-    socket.on('disconnect', (reason) => {
+    socket.on('disconnect', async (reason) => {
       console.log(`❌ Client disconnected: ${username} (${userId}) - Reason: ${reason}`);
-      
+
       if (socket.roomId) {
-        const userId = socket.userId || socket.id;
-        const username = socket.username || 'Anonymous';
-        
-        // Notify other users in the room
-        socket.to(socket.roomId).emit('user-left', {
-          userId,
-          username,
+        const documentId = socket.roomId;
+        const uid = socket.userId || socket.id;
+        const uname = socket.username || 'Anonymous';
+
+        await removeUserFromPresence(documentId, uid);
+        socket.to(documentId).emit('user-left', {
+          userId: uid,
+          username: uname,
+          name: uname,
           timestamp: Date.now(),
           reason,
         });
@@ -252,14 +284,36 @@ export function setupWebSocketServer(httpServer: HTTPServer): SocketIOServer {
     });
   });
 
+  // Remove users from Redis + in-memory after 30s no heartbeat; broadcast user-left
+  const PRESENCE_STALE_INTERVAL = 15000; // 15s
+  const presenceStaleTimer = setInterval(async () => {
+    for (const documentId of roomManager.getRoomIds()) {
+      const staleIds = await removeStalePresence(documentId);
+      for (const uid of staleIds) {
+        const user = roomManager.removeUserById(documentId, uid);
+        if (user) {
+          io.to(documentId).emit('user-left', {
+            userId: uid,
+            username: user.name,
+            name: user.name,
+            timestamp: Date.now(),
+            reason: 'timeout',
+          });
+        }
+      }
+    }
+  }, PRESENCE_STALE_INTERVAL);
+
   // Cleanup on server shutdown
   process.on('SIGTERM', () => {
+    clearInterval(presenceStaleTimer);
     console.log('Cleaning up WebSocket server...');
     roomManager.cleanup();
     io.close();
   });
 
   process.on('SIGINT', () => {
+    clearInterval(presenceStaleTimer);
     console.log('Cleaning up WebSocket server...');
     roomManager.cleanup();
     io.close();
