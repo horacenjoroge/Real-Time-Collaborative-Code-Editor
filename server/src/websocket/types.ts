@@ -6,12 +6,24 @@ export interface AuthenticatedSocket extends Socket {
   roomId?: string;
 }
 
+/** Editor position (1-based line, 1-based column for display). */
+export interface Position {
+  line: number;
+  column: number;
+}
+
+/** Presence user: who's in the document, cursor, selection, color. */
 export interface User {
   id: string;
-  username: string;
+  name: string;
+  username?: string; // legacy, same as name
+  color: string;
+  cursor: { line: number; column: number };
+  selection: { start: Position; end: Position } | null;
   socketId: string;
   joinedAt: number;
   lastPing: number;
+  lastSeen: number;
 }
 
 export interface Room {
