@@ -6,6 +6,17 @@ export interface ConnectionStatus {
   reconnectAttempts: number;
 }
 
+/** Presence user (who's in the document) for sidebar display. */
+export interface PresenceUser {
+  id: string;
+  name: string;
+  color: string;
+  cursor: { line: number; column: number };
+  selection: { start: { line: number; column: number }; end: { line: number; column: number } } | null;
+  lastSeen: number;
+  joinedAt: number;
+}
+
 export interface SocketEvents {
   connected: {
     socketId: string;
@@ -15,20 +26,16 @@ export interface SocketEvents {
   };
   'joined-document': {
     documentId: string;
-    users: Array<{
-      id: string;
-      username: string;
-      joinedAt: number;
-    }>;
+    users: PresenceUser[];
   };
   'user-joined': {
-    userId: string;
-    username: string;
+    user: PresenceUser;
     timestamp: number;
   };
   'user-left': {
     userId: string;
     username: string;
+    name?: string;
     timestamp: number;
     reason?: string;
   };
