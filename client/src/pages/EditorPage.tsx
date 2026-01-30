@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { EditorComponent, EditorConfig, Language } from '../editor/EditorComponent';
+import { EditorComponent, EditorConfig, Language, type RemoteCursor } from '../editor/EditorComponent';
+import type { editor } from 'monaco-editor';
 import { Toolbar } from '../components/Toolbar';
 import { DisconnectionBanner } from '../components/DisconnectionBanner';
 import { PresenceSidebar } from '../components/PresenceSidebar';
@@ -53,6 +54,11 @@ export function EditorPage() {
       operations: OtOperation[];
     }>
   >([]);
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const [remoteCursors, setRemoteCursors] = useState<RemoteCursor[]>([]);
+  const pendingCursorRef = useRef<{ line: number; column: number } | null>(null);
+  const cursorThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const myColorRef = useRef<string>('#6b7280');
 
   // WebSocket connection
   const {
@@ -103,9 +109,10 @@ export function EditorPage() {
     }
   };
 
-  // Reset presence when switching document; join when connected
+  // Reset presence and remote cursors when switching document; join when connected
   useEffect(() => {
     setPresenceUsers([]);
+    setRemoteCursors([]);
     if (isConnected && id) {
       emit('join-document', { documentId: id });
     }
@@ -116,6 +123,8 @@ export function EditorPage() {
     const handleJoinedDocument = (data: { documentId: string; users: PresenceUser[] }) => {
       if (data.documentId !== document?.id) return;
       setPresenceUsers(data.users ?? []);
+      const me = data.users?.find((u) => u.id === userIdRef.current);
+      if (me) myColorRef.current = me.color;
     };
 
     const handleUserJoined = (data: { user: PresenceUser; timestamp: number }) => {
@@ -129,6 +138,27 @@ export function EditorPage() {
 
     const handleUserLeft = (data: { userId: string; username?: string; name?: string; reason?: string }) => {
       setPresenceUsers((prev) => prev.filter((u) => u.id !== data.userId));
+      setRemoteCursors((prev) => prev.filter((c) => c.userId !== data.userId));
+    };
+
+    const handleCursorUpdate = (data: {
+      documentId: string;
+      userId: string;
+      cursor: { line: number; column: number };
+      color?: string;
+    }) => {
+      if (!document || data.documentId !== document.id) return;
+      if (data.userId === userIdRef.current) return; // don't show our own as remote
+      setRemoteCursors((prev) => {
+        const next = new Map(prev.map((c) => [c.userId, c]));
+        next.set(data.userId, {
+          userId: data.userId,
+          line: data.cursor.line,
+          column: data.cursor.column,
+          color: data.color ?? next.get(data.userId)?.color ?? '#6b7280',
+        });
+        return Array.from(next.values());
+      });
     };
 
     const handleError = (data: { message: string }) => {
@@ -204,6 +234,7 @@ export function EditorPage() {
     on('joined-document', handleJoinedDocument);
     on('user-joined', handleUserJoined);
     on('user-left', handleUserLeft);
+    on('cursor-update', handleCursorUpdate as never);
     on('error', handleError);
     on('document-operation', handleDocumentOperation as never);
     on('operation-ack', handleOperationAck as never);
@@ -212,11 +243,43 @@ export function EditorPage() {
       off('joined-document', handleJoinedDocument);
       off('user-joined', handleUserJoined);
       off('user-left', handleUserLeft);
+      off('cursor-update', handleCursorUpdate as never);
       off('error', handleError);
       off('document-operation', handleDocumentOperation as never);
       off('operation-ack', handleOperationAck as never);
     };
   }, [on, off, document]);
+
+  const CURSOR_THROTTLE_MS = 100;
+
+  const handleEditorMount = (editorInstance: editor.IStandaloneCodeEditor) => {
+    editorRef.current = editorInstance;
+    const dispose = editorInstance.onDidChangeCursorPosition((e) => {
+      pendingCursorRef.current = {
+        line: e.position.lineNumber,
+        column: e.position.column,
+      };
+      if (cursorThrottleRef.current) return;
+      cursorThrottleRef.current = setTimeout(() => {
+        cursorThrottleRef.current = null;
+        const pos = pendingCursorRef.current;
+        if (!pos || !document?.id || !isConnected) return;
+        emit('cursor-update', {
+          documentId: document.id,
+          cursor: pos,
+          color: myColorRef.current,
+        });
+      }, CURSOR_THROTTLE_MS);
+    });
+    editorInstance.onDidDispose(() => {
+      if (cursorThrottleRef.current) {
+        clearTimeout(cursorThrottleRef.current);
+        cursorThrottleRef.current = null;
+      }
+      dispose.dispose();
+      editorRef.current = null;
+    });
+  };
 
   // Auto-save with debounce
   useEffect(() => {
@@ -385,6 +448,8 @@ export function EditorPage() {
             value={content}
             onChange={handleContentChange}
             config={config}
+            onEditorMount={handleEditorMount}
+            remoteCursors={remoteCursors}
           />
         </div>
       </div>
