@@ -1,6 +1,7 @@
 import { Editor } from '@monaco-editor/react';
 import { editor } from 'monaco-editor';
-import { useRef } from 'react';
+import * as monaco from 'monaco-editor';
+import { useRef, useEffect } from 'react';
 
 export type Language = 
   | 'javascript'
@@ -33,11 +34,23 @@ export interface EditorConfig {
   insertSpaces: boolean;
 }
 
+export interface RemoteCursor {
+  userId: string;
+  line: number;
+  column: number;
+  color: string;
+}
+
 interface EditorComponentProps {
   value: string;
   onChange?: (value: string | undefined) => void;
   config: EditorConfig;
   onEditorMount?: (editor: editor.IStandaloneCodeEditor) => void;
+  remoteCursors?: RemoteCursor[];
+}
+
+function sanitizeUserId(userId: string): string {
+  return userId.replace(/\W/g, '_').slice(0, 32) || 'u';
 }
 
 export function EditorComponent({
@@ -45,8 +58,10 @@ export function EditorComponent({
   onChange,
   config,
   onEditorMount,
+  remoteCursors = [],
 }: EditorComponentProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const decorationIdsRef = useRef<string[]>([]);
 
   const handleEditorDidMount = (
     editorInstance: editor.IStandaloneCodeEditor
@@ -54,6 +69,44 @@ export function EditorComponent({
     editorRef.current = editorInstance;
     onEditorMount?.(editorInstance);
   };
+
+  // Inject CSS for per-user cursor colors (Monaco decorations use these classes)
+  useEffect(() => {
+    let styleEl = document.getElementById('remote-cursor-styles') as HTMLStyleElement | null;
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'remote-cursor-styles';
+      document.head.appendChild(styleEl);
+    }
+    const rules = remoteCursors
+      .map((c) => {
+        const cls = sanitizeUserId(c.userId);
+        return `.remote-cursor-${cls} { border-left-color: ${c.color} !important; } .remote-cursor-glyph.remote-cursor-${cls} { background-color: ${c.color} !important; }`;
+      })
+      .join('\n');
+    styleEl.textContent = rules;
+  }, [remoteCursors]);
+
+  // Apply remote cursor decorations when remoteCursors or editor changes
+  useEffect(() => {
+    const ed = editorRef.current;
+    if (!ed) return;
+
+    const newDecorations: monaco.editor.IModelDeltaDecoration[] = remoteCursors.map(
+      (c) => ({
+        range: new monaco.Range(c.line, c.column, c.line, c.column),
+        options: {
+          className: `remote-cursor remote-cursor-${sanitizeUserId(c.userId)}`,
+          glyphMarginClassName: `remote-cursor-glyph remote-cursor-${sanitizeUserId(c.userId)}`,
+        },
+      })
+    );
+
+    decorationIdsRef.current = ed.deltaDecorations(
+      decorationIdsRef.current,
+      newDecorations
+    );
+  }, [remoteCursors]);
 
   return (
     <div className="h-full w-full">
