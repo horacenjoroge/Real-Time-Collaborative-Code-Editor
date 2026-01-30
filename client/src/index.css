@@ -15,3 +15,17 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+/* Remote cursors: vertical bar at other users' cursor position */
+.remote-cursor {
+  border-left: 2px solid;
+  margin-left: -1px;
+  pointer-events: none;
+  transition: left 0.1s ease-out, top 0.1s ease-out;
+}
+
+.remote-cursor-glyph {
+  width: 8px !important;
+  border-radius: 2px;
+  transition: top 0.1s ease-out;
+}
