@@ -86,4 +86,10 @@ export interface SocketEvents {
     version: number;
     clientOpId?: string;
   };
+  'cursor-update': {
+    documentId: string;
+    userId: string;
+    cursor: { line: number; column: number };
+    color?: string;
+  };
 }
