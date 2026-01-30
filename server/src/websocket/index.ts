@@ -232,6 +232,20 @@ export function setupWebSocketServer(httpServer: HTTPServer): SocketIOServer {
       }
     });
 
+    // Cursor updates: broadcast to room only, do not persist
+    socket.on('cursor-update', (data: { documentId: string; cursor: { line: number; column: number }; color?: string }) => {
+      const { documentId, cursor, color } = data;
+      if (!documentId || !cursor || typeof cursor.line !== 'number' || typeof cursor.column !== 'number') return;
+      if (!socket.roomId || socket.roomId !== documentId) return;
+      const uid = socket.userId || socket.id;
+      socket.to(documentId).emit('cursor-update', {
+        documentId,
+        userId: uid,
+        cursor,
+        color: color ?? undefined,
+      });
+    });
+
     // Handle disconnection
     socket.on('disconnect', async (reason) => {
       console.log(`❌ Client disconnected: ${username} (${userId}) - Reason: ${reason}`);
